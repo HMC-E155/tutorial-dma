@@ -1,7 +1,7 @@
-// DMA_USART_demo.c
+// DMA_USART_CHAR_main.c
 // Josh Brake
 // jbrake@hmc.edu
-// 11/10/22
+// 11/8/22
 
 // Standard library includes.
 #include <stdint.h>
@@ -13,17 +13,18 @@
 #define USART USART2  // USART2 is the USART instance connected to the virtual COM port on the ST-LINK
 // 32-character array
 
-//#define MYSTERY_ARRAY
+#define MYSTERY_ARRAY
 
 #ifndef MYSTERY_ARRAY
   #define CHAR_ARRAY_SIZE 20
   const char CHAR_ARRAY[CHAR_ARRAY_SIZE] = "This is a DMA Test!\n";
-  #define CHAR_PER_SECOND 10
+  #define CHAR_PER_SECOND 20
 #else
   #define CHAR_ARRAY_SIZE 232
   const char CHAR_ARRAY[CHAR_ARRAY_SIZE] = "\n  __  __  _                    ____        _  \n |  \\/  |(_)  ___  _ __  ___  |  _ \\  ___ | |\n | |\\/| || | / __|| '__|/ _ \\ | |_) |/ __|| |\n | |  | || || (__ | |  | (_) ||  __/ \\__ \\|_|\n |_|  |_||_| \\___||_|   \\___/ |_|    |___/(_)\n";
   #define CHAR_PER_SECOND 100
 #endif
+
 
 #define HSI_FREQ 16000000
 
@@ -35,16 +36,17 @@ int main(void) {
     ////////////////////////////////
     // RCC Configuration
     ////////////////////////////////
-    
+
     // Enable peripherals: GPIOA, DMA, TIM2.
     RCC->AHB1ENR  |= (RCC_AHB1ENR_DMA1EN);
     RCC->AHB2ENR  |= (RCC_AHB2ENR_GPIOAEN);
     RCC->APB1ENR1 |= (RCC_APB1ENR1_TIM2EN);
-
+    
+    
     ////////////////////////////////
     // USART Configuration
     ////////////////////////////////
-    
+
     // Set PA2 to ALT function
     GPIOA->MODER &= ~(GPIO_MODER_MODER2);
     GPIOA->MODER |= _VAL2FLD(GPIO_MODER_MODE2, 0b10);
@@ -71,31 +73,48 @@ int main(void) {
     
     USART->CR1 |= (USART_CR1_UE); // Enable USART
     USART->CR1 |= (USART_CR1_TE | USART_CR1_RE); // Enable USART2
-   
+
 
     ////////////////////////////////
     // DMA configuration
     ////////////////////////////////
 
-    // TODO: Reset DMA channel configuration
-    
-    // TODO: Set DMA Channel configuration
+    // Configure DMA1 to excecute a transaction based on an event from TIM2 update event
+    // So, find TIM2_UP which gets muxed into channel 2 of DMA1
+    // Need to set C2S[3:0] to 0b0100 to choose TIM2_UP as the DMA trigger
+
+    // DMA1 configuration (channel 2 / selection 4).
+    // SxCR register:
+    // - Memory-to-peripheral
+    // - Circular mode enabled.
+    // - Increment memory ptr, don't increment periph ptr.
+    // - 8-bit data size for both source and destination.
+    // - High priority (2/3).
+
+
+    // Reset DMA1 Channel 2
+    DMA1_Channel2->CCR  &= ~(0xFFFFFFFF);
+    DMA1_Channel2->CCR  |= (_VAL2FLD(DMA_CCR_PL,0b10) |
+                            _VAL2FLD(DMA_CCR_MINC, 0b1) |
+                            _VAL2FLD(DMA_CCR_CIRC, 0b1) |
+                            _VAL2FLD(DMA_CCR_DIR, 0b1)
+                            );
     
     // Set DMA source and destination addresses.
-    // TODO: Source: Address of the character array buffer in memory.
-    
+    // Source: Address of the character array buffer in memory.
+    DMA1_Channel2->CMAR = _VAL2FLD(DMA_CMAR_MA, (uint32_t) &CHAR_ARRAY);
 
-    // TODO: Dest.: USART data register
-    
+    // Dest.: USART data register
+    DMA1_Channel2->CPAR = _VAL2FLD(DMA_CPAR_PA, (uint32_t) &(USART->TDR));
 
-    // TODO: Set DMA data transfer length (# of samples).
+    // Set DMA data transfer length (# of samples).
+    DMA1_Channel2->CNDTR  |= _VAL2FLD(DMA_CNDTR_NDT, CHAR_ARRAY_SIZE);
     
-    
-    // TODO: Select correct selection for DMA channel
-    
+    // Select 4th option for mux to channel 2
+    DMA1_CSELR->CSELR |= _VAL2FLD(DMA_CSELR_C2S, 4);
 
-    // TODO: Enable DMA channel.
-    
+    // Enable DMA1 channel.
+    DMA1_Channel2->CCR  |= DMA_CCR_EN;
 
     ////////////////////////////////
     // TIM2 Configuration
@@ -105,14 +124,14 @@ int main(void) {
     TIM->PSC  =  0x0000;
     TIM->ARR  =  SystemCoreClock/CHAR_PER_SECOND;
     
-    // TODO: Enable trigger output on timer update events.
+    // Enable trigger output on timer update events.
+    TIM->CR2 |= (TIM_CR2_CCDS); // Set DMA request when update event occurs
     
-    
-    // TODO: Setup DMA request on update event for timer
-    
+    // Setup DMA request on update event for timer
+    TIM->DIER |= (TIM_DIER_UDE);
 
-    // TODO: Start the timer.
-    
+    // Start the timer.
+    TIM->CR1 |=  (TIM_CR1_CEN);
 
     while (1) {
     }
